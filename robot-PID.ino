@@ -1,6 +1,6 @@
 // code from https://aprendiendofacilelectronica.blogspot.com/2016/11/robot-velocista-qtr8a-parte-iii.html
 
-#include "QTRSensors/QTRSensors.h"
+#include <QTRSensors.h>
 
 // entradas
 #define btn1 0
@@ -16,12 +16,13 @@
 #define md2 7
 #define pwmd 5 //~
 
-#define NUM_SENSORS 8            // number of sensors used
+#define NUM_SENSORS 7            // number of sensors used
 #define NUM_SAMPLES_PER_SENSOR 1 // average 4 analog samples per sensor reading
 #define EMITTER_PIN 9            // emitter is controlled by digital pin 2
 
-QTRSensorsAnalog qtra((unsigned char[]){7, 6, 5, 4, 3, 2, 1, 0}, NUM_SENSORS, NUM_SAMPLES_PER_SENSOR, EMITTER_PIN);
-unsigned int sensorValues[NUM_SENSORS];
+QTRSensors qtra;
+uint16_t sensorValues[NUM_SENSORS];
+
 int proporcional = 0;
 int derivativo = 0;
 int integral = 0;
@@ -44,8 +45,12 @@ int ruido = 30;
 int boton1 = 7;
 int boton2 = 7;
 
-void setup()
-{
+int readLine(uint16_t *sensor_values, QTRReadMode readMode, int white_line, int flanco_sens, int keep_track, int noise_threshold, int numSensors);
+
+void setup() {
+    qtra.setTypeAnalog();
+    qtra.setSensorPins((const uint8_t[]){A7, A6, A5, A4, A3, A2, A1}, NUM_SENSORS);
+
     pinMode(led1, OUTPUT);
     pinMode(led_on, OUTPUT);
     pinMode(mi1, OUTPUT);
@@ -61,19 +66,16 @@ void setup()
     delay(200);
 
     digitalWrite(led1, HIGH);     // turn on Arduino's LED to indicate we are in calibration mode
-    for (int i = 0; i < 200; i++) // make the calibration take about 10 seconds
-    {
+    for (int i = 0; i < 200; i++) {// make the calibration take about 10 seconds
         qtra.calibrate(); // reads all sensors 10 times at 2.5 ms per six sensors (i.e. ~25 ms per call)
     }
     digitalWrite(led1, LOW); // turn off Arduino's LED to indicate we are through with calibration
                              // Serial.begin(115200);
     // Serial.println();
 
-    while (true)
-    {
+    while(true) {
         botones();
-        if (boton2 == 0)
-        {
+        if(boton2 == 0) {
             delay(20);
             digitalWrite(led1, HIGH);
             delay(100);
@@ -87,8 +89,7 @@ void setup()
     // bt.println("Hello, world?");
 }
 
-void loop()
-{
+void loop() {
     pid(1, velocidad, KP, KI, KD);
     frenos_contorno(600);
 
@@ -96,10 +97,10 @@ void loop()
     delay(2);
 }
 
-void pid(int linea, int velocidad, float Kp, float Ki, float Kd)
-{
+void pid(int linea, int velocidad, float Kp, float Ki, float Kd) {
 
-    position = qtra.readLine(sensorValues, QTR_EMITTERS_ON, linea, flanco_color, en_linea, ruido);
+    QTRReadMode modeON = QTRReadMode::On;
+    position = readLine(sensorValues, modeON, linea, flanco_color, en_linea, ruido, NUM_SENSORS);
     // 0 linea negra, 1 para linea blanca
 
     //  Serial.println(position);
@@ -107,9 +108,9 @@ void pid(int linea, int velocidad, float Kp, float Ki, float Kd)
     integral = integral + proporcional_pasado;         // obteniendo integral
     derivativo = (proporcional - proporcional_pasado); // obteniedo el derivativo
     int ITerm = integral * KI;
-    if (ITerm >= 255)
+    if(ITerm >= 255)
         ITerm = 255;
-    if (ITerm <= -255)
+    if(ITerm <= -255)
         ITerm = -255;
 
     salida_pwm = (proporcional * KP) + (derivativo * KD) + (ITerm);
@@ -119,8 +120,7 @@ void pid(int linea, int velocidad, float Kp, float Ki, float Kd)
     if (salida_pwm < -velocidad)
         salida_pwm = -velocidad;
 
-    if (salida_pwm < 0)
-    {
+    if (salida_pwm < 0) {
         int der = velocidad - salida_pwm; //(+)
         int izq = velocidad + salida_pwm; //(-)
         if (der >= 255)
@@ -129,8 +129,8 @@ void pid(int linea, int velocidad, float Kp, float Ki, float Kd)
             izq = 0;
         motores(izq, der);
     }
-    if (salida_pwm > 0)
-    {
+
+    if (salida_pwm > 0) {
         int der = velocidad - salida_pwm; //(-)
         int izq = velocidad + salida_pwm; //(+)
 
@@ -144,40 +144,33 @@ void pid(int linea, int velocidad, float Kp, float Ki, float Kd)
     proporcional_pasado = proporcional;
 }
 
-void frenos_contorno(int flanco_comparacion)
-{
-    if (position <= 10) // si se salio por la parte derecha de la linea
-    {
-        while (true)
-        {
+void frenos_contorno(int flanco_comparacion) {
+    if (position <= 10) { // si se salio por la parte derecha de la linea
+        while (true) {
             digitalWrite(led1, HIGH);
             motores(-125, 60);
             qtra.read(sensorValues); // lectura en bruto de sensor
-            if (sensorValues[0] < flanco_comparacion || sensorValues[1] < flanco_comparacion || sensorValues[2] < flanco_comparacion || sensorValues[3] < flanco_comparacion || sensorValues[4] < flanco_comparacion || sensorValues[5] < flanco_comparacion || sensorValues[6] < flanco_comparacion || sensorValues[7] < flanco_comparacion)
-            {
+            if (sensorValues[0] < flanco_comparacion || sensorValues[1] < flanco_comparacion || sensorValues[2] < flanco_comparacion || sensorValues[3] < flanco_comparacion || sensorValues[4] < flanco_comparacion || sensorValues[5] < flanco_comparacion || sensorValues[6] < flanco_comparacion || sensorValues[7] < flanco_comparacion) {
                 break;
             }
         }
     }
 
-    if (position >= 6990) // si se salio por la parte izquierda de la linea
-    {
-        while (true)
-        {
+    if (position >= 6990) { // si se salio por la parte izquierda de la linea
+        while (true) {
             digitalWrite(led1, HIGH);
             motores(60, -125);
             qtra.read(sensorValues);
-            if (sensorValues[7] < flanco_comparacion || sensorValues[6] < flanco_comparacion || sensorValues[5] < flanco_comparacion || sensorValues[4] < flanco_comparacion || sensorValues[3] < flanco_comparacion || sensorValues[2] < flanco_comparacion || sensorValues[1] < flanco_comparacion || sensorValues[0] < flanco_comparacion)
-            {
+            if (sensorValues[7] < flanco_comparacion || sensorValues[6] < flanco_comparacion || sensorValues[5] < flanco_comparacion || sensorValues[4] < flanco_comparacion || sensorValues[3] < flanco_comparacion || sensorValues[2] < flanco_comparacion || sensorValues[1] < flanco_comparacion || sensorValues[0] < flanco_comparacion) {
                 break;
             }
         }
     }
+
     digitalWrite(led1, LOW);
 }
 
-void motores(int motor_izq, int motor_der)
-{
+void motores(int motor_izq, int motor_der) {
     if (motor_izq >= 0)
     {
         digitalWrite(mi1, LOW);
@@ -207,8 +200,50 @@ void motores(int motor_izq, int motor_der)
     }
 }
 
-void botones()
-{
+void botones() {
     boton1 = digitalRead(btn2);
     boton2 = digitalRead(btn1); /// boton izquierdo, derecho
+}
+
+int readLine(uint16_t *sensor_values, QTRReadMode readMode, int white_line, int flanco_sens, int keep_track, int noise_threshold, int numSensors) {
+    unsigned char i, on_line = 0;
+    unsigned long avg; // this is for the weighted total, which is long before division
+    unsigned int sum; // this is for the denominator which is <= 64000
+    static int last_value = 0; // assume initially that the line is left.
+
+    qtra.readCalibrated(sensor_values, readMode);
+
+    avg = 0;
+    sum = 0;
+
+    for (i = 0; i < numSensors; i++) {
+        int value = sensor_values[i]; // cambio de flanco
+        if (white_line)
+            value = 1000 - value;
+
+        // keep track of whether we see the line at all
+        if (value > keep_track) {
+            on_line = 1;
+        }
+
+        // only average in values that are above a noise threshold
+        if (value > noise_threshold) {
+            avg += (long)(value) * (i * 1000);
+            sum += value;
+        }
+    }
+
+    if (!on_line) {
+        // If it last read to the left of center, return 0.
+        if (last_value < (numSensors - 1) * 1000 / 2)
+            return 0;
+
+        // If it last read to the right of center, return the max.
+        else
+            return (numSensors - 1) * 1000;
+    }
+
+    last_value = avg / sum;
+
+    return last_value;
 }
